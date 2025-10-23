@@ -57,7 +57,7 @@ end
 # ### #### ##### ######
 # Main methods for command line use
 if __FILE__ == $PROGRAM_NAME
-  workdir = '_npwork'
+  workdir = '../../atmp/_npwork/'
   infile = File.join(workdir, 'npdetector.csv')
   reportfile = File.join(workdir, 'npdetector.json')
   npd = NPDetector.new(workdir, File.join(workdir, 'cache'))

@@ -73,8 +73,8 @@ end
 # ### #### ##### ######
 # Main method for command line use
 if __FILE__ == $PROGRAM_NAME
-  workdir = '../atmp/'
-  outfile = '../atmp/mdnormalize.txt'
+  workdir = '../../atmp/_npwork/'
+  outfile = '../../atmp/_npwork/mdnormalize.txt'
   schema = '../fossfoundation/_data/foundations-schema.json'
   puts "BEGIN #{__FILE__}.normalize_dataset(#{workdir}, #{schema})"
   fields = MDNormalize.dump_schema_fields(schema)
