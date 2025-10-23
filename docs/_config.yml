@@ -1,0 +1,26 @@
+theme: jekyll-theme-minima
+title: DataSite
+description: Templates and tools for building GHPages Jekyll based data-driven websites. 
+author:
+  name: Shane Curcuru
+  email: shane@punderthings.com
+
+minima:
+  social_links:
+    - title: Bluesky
+      icon: fa-bluesky
+      url: https://bsky.app/profile/shanecurcuru.bsky.social
+
+collections:
+  testdata:
+    output: true
+    sort_by: name
+    permalink: /:collection/:path
+
+foundations:
+  - identifier: almalinux
+    commonName: AlmaLinux
+  - identifier: apereo
+    commonName: Apereo
+  - identifier: asf
+    commonName: Apache Software Foundation
