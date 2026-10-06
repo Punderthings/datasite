@@ -16,7 +16,7 @@ module NPCondenser
   # @return simplified text values array
   def condense_textmatch(matchhash)
     nonprofit = []
-    matchhash.each_value do |v|
+    matchhash&.each_value do |v|
       nonprofit << v.join(';') unless v.empty?
     end
     nonprofit
@@ -27,18 +27,18 @@ module NPCondenser
   # @param socials Hash to mutate if we find additional data
   # @return orgname String if data exists
   def condense_yoast(yoast, socials)
-    return '' unless yoast
+    graph = yoast['@graph'] if yoast.is_a?(Hash)
+    return '' unless graph.is_a?(Array)
 
     orgname = ''
-    yoast['@graph'].each do |elem|
+    graph.each do |elem|
+      next unless elem.is_a?(Hash)
       next unless 'Organization'.eql?(elem.fetch('@type', nil))
 
       orgname = elem['name']
-      sameas = elem.fetch('sameAs', nil)
-      next unless sameas
-
+      sameas = Array(elem.fetch('sameAs', nil)) # May be a single string
       SOCIAL_MAP.each do |id, regex|
-        found = sameas.select { |s| regex.match(s) }.first
+        found = sameas.find { |s| regex.match(s.to_s) }
         socials[id] = found if found
       end
     end
@@ -47,14 +47,10 @@ module NPCondenser
 
   # Encapsulate aggregating links (mutates inputs)
   def aggregate_links(data, aggregate)
-    if data[NAVLINKS].key?(ALLLINKS)
-      data[NAVLINKS][ALLLINKS].each do |l|
-        aggregate[NAVLINKS][l] += 1
-      end
+    data.dig(NAVLINKS, ALLLINKS)&.each do |l|
+      aggregate[NAVLINKS][l] += 1
     end
-    return unless data[FOOTERLINKS].key?(ALLLINKS)
-
-    data[FOOTERLINKS][ALLLINKS].each do |l|
+    data.dig(FOOTERLINKS, ALLLINKS)&.each do |l|
       aggregate[FOOTERLINKS][l] += 1
     end
   end
@@ -63,22 +59,23 @@ module NPCondenser
   # HACK: This method does a best guess at each datafield
   def condense_site(file, aggregate, errlog)
     data = JSON.load_file(file)
+    metas = data[METAS] || {} # Missing if the site fetch/parse failed
+    links = data[LINKS] || {}
     condensed = {}
     socials = {}
     identifier = File.basename(file)
     aggregate['sites'] << identifier
     condensed['identifier'] = identifier
-    condensed['title'] = data[METAS].fetch('title', nil)
-    condensed['title'] ||= data[METAS].fetch('titleog', nil)
+    condensed['title'] = metas.fetch('title', nil)
+    condensed['title'] ||= metas.fetch('titleog', nil)
     condensed['commonName'] = data.fetch('commonName', nil)
-    condensed['legalName'] =
-      condense_yoast(data[METAS].fetch('yoast', nil), socials)
+    condensed['legalName'] = condense_yoast(metas.fetch('yoast', nil), socials)
     condensed['legalName_alt'] = data.fetch('legalName', nil)
-    socials['twitter'] = data[METAS].fetch('twitter', nil)
-    condensed['description'] = data[METAS].fetch('description', nil)
-    condensed['description'] ||= data[METAS].fetch('descriptionog', nil)
+    socials['twitter'] = metas.fetch('twitter', nil)
+    condensed['description'] = metas.fetch('description', nil)
+    condensed['description'] ||= metas.fetch('descriptionog', nil)
     condensed['description_alt'] ||= data.fetch('description', nil)
-    condensed['website'] = data[METAS].fetch('canonical', nil)
+    condensed['website'] = metas.fetch('canonical', nil)
     condensed['website'] ||= data.fetch('website', nil)
     condensed['slogan'] = data.fetch('slogan', nil)
     condensed['copyright'] = data['copyright'] if data.key?('copyright')
@@ -86,27 +83,25 @@ module NPCondenser
     condensed['addressCountry'] = data.fetch('addressCountry', '')
     condensed['addressRegion'] = data.fetch('addressRegion', '')
     LINKRX_MAP.each_key do |k|
-      condensed[k] = data[LINKS].fetch(k, nil)
+      condensed[k] = links.fetch(k, nil)
     end
     # Simplistic collapse of any nonprofit hints
     condensed['taxID'] = data.fetch('taxID', nil)
     condensed['nonprofitStatus'] = data.fetch('nonprofitStatus', nil)
     condensed['nonprofitStatus_alt'] = condense_textmatch(data['textmatch'])
-    condensed['icon32'] = data[METAS]['icon32']
-    condensed['webgenerator'] = data[METAS].fetch('generator', [])&.to_s
+    condensed['icon32'] = metas['icon32']
+    condensed['webgenerator'] = metas.fetch('generator', [])&.to_s
     condensed['social'] = socials
 
     # Write out the condensed yaml in md file
-    File.open(file.sub('.json', '.md'), 'w') do |f|
+    File.open(file.sub(/\.json\z/, '.md'), 'w') do |f|
       f.puts condensed.to_yaml
     end
     # Also collect all links in an aggregator
     aggregate_links(data, aggregate)
   rescue StandardError => e
-    errlog << %{
-      #{__method__}(#{file}):
-      #{e.message}\n\n#{e.backtrace.join("\n\t")}"
-      }
+    errlog << "#{__method__}(#{file}): #{e.message}\n\n" \
+              "#{e.backtrace.join("\n\t")}"
   end
 
   # Condense scanned json data into schema-hinted md files
@@ -120,7 +115,8 @@ module NPCondenser
       'sites' => []
     }
     Dir["#{dir}/*.json"].each do |f|
-      next if f.include?('npdetector') # HACK: ignore synopsis file
+      # HACK: ignore synopsis file (check basename: dir may contain the name)
+      next if File.basename(f).start_with?('npdetector')
 
       condense_site(f, data, errlog)
     end
