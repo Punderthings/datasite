@@ -50,6 +50,8 @@ class NPDetector
                 'w') do |f|
         f.puts JSON.pretty_generate(sitehash)
       end
+    rescue StandardError => e # Log and skip bad rows; don't abort the run
+      errlog << "#{__method__}(#{orghash['website'].inspect}): #{e.message}"
     end
   end
 end

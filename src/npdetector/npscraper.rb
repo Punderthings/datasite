@@ -15,11 +15,13 @@ module NPScraper
   require 'fileutils'
 
   HACK_DO_ABOUT = false # FIXME: reads multiple files that need caching
+  OPEN_TIMEOUT = 15 # Seconds; don't let one slow site stall the whole run
+  READ_TIMEOUT = 30
 
   # @return text content of first node.css(selector) found; nil if none
   def get_first_css(node, selector)
-    nodelist = node.css(selector)
-    nodelist[0].first.content.strip.gsub(/[\t\n]/, '') if nodelist[0]
+    found = node.at_css(selector)
+    found.content.strip.gsub(/[\t\n]/, '') if found
   end
 
   # @return hash of data from Yoast SEO when available; nil otherwise
@@ -27,13 +29,9 @@ module NPScraper
     node = head.at_css('.yoast-schema-graph')
     return nil unless node
 
-    begin
-      yoast = JSON.parse(node.content)
-    rescue StandardError => e
-      yoast['error_get_yoast_graph'] =
-        "#{e.message}\n\n#{e.backtrace.join("\n\t")}"
-    end
-    yoast
+    JSON.parse(node.content)
+  rescue JSON::ParserError => e
+    { 'error_get_yoast_graph' => e.message }
   end
 
   # Get a single meta value if present
@@ -185,8 +183,14 @@ module NPScraper
 
   # Simplistic identifier based on url.
   # @return name_org form of url, like company_com
+  # @raise ArgumentError if url isn't an absolute http(s) url
   def url2identifier(url)
-    URI(url.downcase).host.sub('www.', '').gsub('.', '_')
+    uri = URI(url.to_s.strip.downcase)
+    unless %w[http https].include?(uri.scheme) && uri.host
+      raise ArgumentError, "website must be an http(s) url: #{url.inspect}"
+    end
+
+    uri.host.sub(/\Awww\./, '').gsub('.', '_')
   end
 
   # Get the plain html of a news website, aggressively caching
@@ -194,28 +198,34 @@ module NPScraper
   # @param dir String local directory for cache
   # @param filename String local file to cache
   # @param refresh Boolean if true, force a lookup from site
-  # @return io stream of the site's .html content
+  # @return String of the site's .html content; nil on failure
+  # NOTE: only successful, non-empty fetches are cached; empty cache files
+  #   (left by older versions on failed fetches) are refetched
   def get_site(url, cachedir, file, errlog, refresh: false)
     FileUtils.mkpath(cachedir)
     filename = File.join(cachedir, file)
-    begin
-      if refresh || !File.exist?(filename)
-        File.open(filename, 'w') do |f|
-          f.puts URI.parse(url).open.read
-        end
-      end
-      File.open(filename)
-    rescue StandardError => e
-      errlog << "get_site: #{e.message}\n\n#{e.backtrace.join("\n\t")}"
-      nil
-    end
+    return File.binread(filename) if !refresh && File.size?(filename)
+
+    html = URI.parse(url).open(open_timeout: OPEN_TIMEOUT,
+                               read_timeout: READ_TIMEOUT).read
+    raise "empty response from #{url}" if html.empty?
+
+    File.binwrite(filename, html)
+    html
+  rescue StandardError => e
+    errlog << "get_site(#{url}): #{e.class}: #{e.message}"
+    nil
   end
 
   # Convenience method to scrape one site into detailed nested hashes
   def scrape_site(siteurl, cachedir, org, errlog)
     ident = url2identifier(siteurl)
     io = get_site(siteurl, cachedir, "#{ident}.html", errlog, refresh: false)
-    data = parse_site(io, siteurl, errlog)
+    data = if io
+             parse_site(io, siteurl, errlog)
+           else
+             { 'error_get_site' => "Could not fetch #{siteurl}" }
+           end
     # If we are given manual data about the org, pass it through
     org&.each do |k, v| # FIXME: check safe navigation instead of if org
       data[k] = v # REVIEW: This may overwrite some scanned data
