@@ -22,6 +22,27 @@ class NPDetector
 
   attr_accessor :errlog, :workdir, :cachedir
 
+  # Parse command line options
+  # @return hash of options; exits with usage on errors
+  def self.parse_commandline(argv)
+    options = {}
+    parser = OptionParser.new do |opts|
+      opts.banner = "Usage: #{File.basename($PROGRAM_NAME)} --workdir DIR"
+      opts.separator 'Reads DIR/npdetector.csv; writes .json/.md per site, ' \
+                     'DIR/npdetector.json report, and DIR/cache/*.html'
+      opts.on('-w', '--workdir DIR', 'Work directory (required)') do |dir|
+        options[:workdir] = dir
+      end
+    end
+    parser.parse!(argv)
+    raise OptionParser::MissingArgument, '--workdir' unless options[:workdir]
+
+    options
+  rescue OptionParser::ParseError => e
+    warn e.message
+    abort parser.to_s
+  end
+
   # Simplistic workdirs and logging setup
   def initialize(workdir, cachedir)
     @errlog = []
@@ -59,8 +80,9 @@ end
 # ### #### ##### ######
 # Main methods for command line use
 if __FILE__ == $PROGRAM_NAME
-  workdir = '../../atmp/_npwork/'
+  workdir = NPDetector.parse_commandline(ARGV)[:workdir]
   infile = File.join(workdir, 'npdetector.csv')
+  abort "ERROR: input file not found: #{infile}" unless File.file?(infile)
   reportfile = File.join(workdir, 'npdetector.json')
   npd = NPDetector.new(workdir, File.join(workdir, 'cache'))
   csv = npd.read_csv(infile)
